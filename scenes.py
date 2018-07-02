@@ -1,6 +1,8 @@
 import numpy as np
 import config
 import matplotlib.image as mpimg
+from scipy import signal
+
 
 import logging
 
@@ -9,10 +11,25 @@ logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:
     level=config.LOG_LEVEL)
 
 class map_1_basic(object):
-    def __init__(self):
+    def __init__(self, no_particles=20):
+
+        self.no_particles = no_particles
+
         map_name = 'map_1.png'
-        self.map = mpimg.imread(map_name)[::-1, :, :]
-        logging.debug(self.map[0, 0:5, 0])
+        self.map = mpimg.imread(map_name)[::-1, :, 0]
+
+        mark = np.ones((config.ROBOT_DIAMETER, config.ROBOT_DIAMETER))
+
+        self.convolve_mark = (signal.convolve2d(1-self.map[:, :], mark, mode='same', boundary='fill', fillvalue=0)) / np.sum(mark)
+
+        self.convolve_mark_overlay = np.copy(self.map)
+
+        threshold = 1/np.sum(mark)
+        self.convolve_mark_overlay[self.convolve_mark > threshold] = 0.2
+
+        self.map_with_safe_boundary = np.copy(self.map)
+        self.map_with_safe_boundary[self.convolve_mark > threshold] = 0.0 # zero is obstacle.
+
         self.landmarks = [
             (165, 100-20, 2*np.pi-0.5*np.pi),
             (165, 100-74, np.pi), # next move theta
@@ -31,6 +48,14 @@ class map_1_basic(object):
 
         logging.info('we have %d controls' % len(self.controls))
         # print(self.controls)
+
+        self.traversable_area = np.stack(np.nonzero(1 - (self.map_with_safe_boundary.T < 0.7)), axis=1)
+        particles_xy_indices = np.random.choice(self.traversable_area.shape[0], size=self.no_particles, replace=True)
+        particles_xy = self.traversable_area[particles_xy_indices]
+
+        particles_theta = np.random.uniform(0.0, 2*np.pi, (self.no_particles, 1))
+
+        self.particles = np.hstack([particles_xy, particles_theta])
 
         self.state_idx = 0
 
@@ -65,7 +90,7 @@ class map_1_basic(object):
         mark = np.zeros(self.map.shape)
         mark[y_steps_int, x_steps_int] = 1
 
-        collided_map = self.map[y_steps_int, x_steps_int, 0] < threshold
+        collided_map = self.map[y_steps_int, x_steps_int] < threshold
 
         if np.sum(collided_map) > 0:
             collisions = np.nonzero(collided_map)

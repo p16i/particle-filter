@@ -21,7 +21,7 @@ robot_pos = None
 def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
     global robot_pos
 
-    scene = getattr(scenes, scene)()
+    scene = getattr(scenes, scene)(no_particles)
     mm = scene.map
 
     robot_pos = scene.landmarks[0]
@@ -34,13 +34,14 @@ def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
     # fig.patch.set_visible(False)
     ax.axis('off')
 
-    background = ax.imshow(mm, origin='lower')
+    background = ax.imshow(mm, origin='lower', cmap='gist_gray', vmax=1, vmin=0)
+    overlay = ax.imshow(scene.convolve_mark_overlay, origin='lower', cmap='gist_gray', vmax=1, vmin=0, alpha=0.0)
 
     no_particles_text = ax.text(0.02, 0.83, '', transform=ax.transAxes)
     time_text = ax.text(0.02, 0.90, '', transform=ax.transAxes)
 
     robot, = ax.plot([], [], config.ROBOT_SYMBOL, ms=config.ROBOT_SYMBOL_SIZE)
-    particles, = ax.plot([], [], config.PARTICLE_SYMBOL, ms=config.PARTICLE_SYMBOL_SIZE, alpha=0.5)
+    particles, = ax.plot([], [], config.PARTICLE_SYMBOL, ms=config.PARTICLE_SYMBOL_SIZE, alpha=config.PARTICLE_OPACITY)
 
     estimate_model = simple_estimating.position_estimating_model(config.FIELD_DIMS, no_particles)
 
@@ -48,6 +49,10 @@ def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
                         scale=1, units='xy', color=config.RADAR_COLOR,
                         headlength=0, headwidth=0,
                         width=config.RADAR_WITDH)
+
+    particle_directions = ax.quiver([], [], [], [],
+                                    scale=1, units='xy', color='r', alpha=config.PARTICLE_OPACITY,
+                                    width=config.RADAR_WITDH)
 
     # initialization function: plot the background of each frame
     def init():
@@ -57,7 +62,7 @@ def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
         time_text.set_text('')
         no_particles_text.set_text('')
 
-        return background, robot, particles, time_text, no_particles_text
+        return background, overlay, robot, particles, time_text, no_particles_text
 
     # animation function.  This is called sequentially
     def animate(i):
@@ -88,10 +93,7 @@ def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
         logging.debug('Measurements:')
         logging.debug(noise_free_measurements)
 
-        # todo: particles
-        # todo: sample from control
-
-        # important weighting
+        # todo: sample from motion model
 
         sensors = ax.quiver(
             radar_src[0, :],
@@ -102,20 +104,23 @@ def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
             headlength=0, headwidth=0,
             width=config.RADAR_WITDH)
 
-        # # print(robot_pos)
-        #
-        #
-        # # create a measure with putting noise on the exact position
-        # noisey_robo_mes = np.array(robot_pos) + (np.random.normal(0, config.SENSOR_NOISE, len(robot_pos)))
-        # # do the localization step
-        # # estimate_model.localization_step(control, noisey_robo_mes)
-        # #
-        # # px, py, *_ = estimate_model.get_particle_coordinates()
-
         robot.set_data([robot_pos[0]], [robot_pos[1]])
-        # particles.set_data(px, py)
 
-        return background, robot, particles, time_text, no_particles_text, sensors
+        # todo: apply controls to particles, with control, and measurement
+
+        # todo: important weighting
+
+        # todo : particle resampling
+        particles.set_data(scene.particles[:, 0], scene.particles[:, 1])
+
+        pariticle_directions = ax.quiver(
+            scene.particles[:, 0], scene.particles[:, 1],
+            np.cos(scene.particles[:, 2])*config.PARTICLE_DIRECTION_DISTANCE,
+            np.sin(scene.particles[:, 2])*config.PARTICLE_DIRECTION_DISTANCE,
+            scale=1, units='xy', color='r', alpha=config.PARTICLE_OPACITY,
+            width=config.RADAR_WITDH)
+
+        return background, overlay, robot, particles, time_text, no_particles_text, sensors, pariticle_directions
 
     # call the animator.  blit=True means only re-draw the parts that have changed.
     anim = animation.FuncAnimation(fig, animate, init_func=init,
