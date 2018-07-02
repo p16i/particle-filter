@@ -1,4 +1,5 @@
 import numpy as np
+import logging
 
 MAP_WIDTH = 200
 MAP_HEIGHT = 100
@@ -26,3 +27,8 @@ SENSOR_NOISE = 0.3
 PARTICLE_SYMBOL = 'ro'
 PARTICLE_SYMBOL_SIZE = 3
 
+RADAR_COLOR = 'b'
+RADAR_WITDH = 0.5
+RADAR_MAX_LENGTH = 50
+
+LOG_LEVEL=logging.ERROR
