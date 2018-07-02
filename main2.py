@@ -43,8 +43,6 @@ def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
     robot, = ax.plot([], [], config.ROBOT_SYMBOL, ms=config.ROBOT_SYMBOL_SIZE)
     particles, = ax.plot([], [], config.PARTICLE_SYMBOL, ms=config.PARTICLE_SYMBOL_SIZE, alpha=config.PARTICLE_OPACITY)
 
-    estimate_model = simple_estimating.position_estimating_model(config.FIELD_DIMS, no_particles)
-
     sensors = ax.quiver([], [], [], [],
                         scale=1, units='xy', color=config.RADAR_COLOR,
                         headlength=0, headwidth=0,
@@ -70,7 +68,8 @@ def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
         time_text.set_text('Time = %4d' % (i+1))
         no_particles_text.set_text('No. Particles = %d' % no_particles)
 
-        robot_pos, control, v = scene.move(robot_pos)
+        control = scene.get_control()
+        robot_pos, v = scene.perform_control(robot_pos, control)
 
         radar_src = np.array([[robot_pos[0]]*scene.no_sensors, [robot_pos[1]]*scene.no_sensors])
 
@@ -93,8 +92,6 @@ def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
         logging.debug('Measurements:')
         logging.debug(noise_free_measurements)
 
-        # todo: sample from motion model
-
         sensors = ax.quiver(
             radar_src[0, :],
             radar_src[1, :],
@@ -106,11 +103,18 @@ def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
 
         robot.set_data([robot_pos[0]], [robot_pos[1]])
 
-        # todo: apply controls to particles, with control, and measurement
+        particle_positions, particle_velocities = scene.vperform_control(scene.particles, control)
 
-        # todo: important weighting
+        # todo: measure model ( important weigthings )
+        important_weigthings = np.ones(particle_positions.shape[0]) / particle_positions.shape[0]
 
-        # todo : particle resampling
+        particle_resampling_indicies = np.random.choice(particle_positions.shape[0], particle_positions.shape[0],
+                                                        replace=True, p=important_weigthings)
+
+        particle_resampling = particle_positions[particle_resampling_indicies]
+
+        scene.particles = particle_resampling
+
         particles.set_data(scene.particles[:, 0], scene.particles[:, 1])
 
         pariticle_directions = ax.quiver(
@@ -120,7 +124,7 @@ def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
             scale=1, units='xy', color='r', alpha=config.PARTICLE_OPACITY,
             width=config.RADAR_WITDH)
 
-        return background, overlay, robot, particles, time_text, no_particles_text, sensors, pariticle_directions
+        return background, overlay, particles, time_text, no_particles_text, pariticle_directions, robot, sensors
 
     # call the animator.  blit=True means only re-draw the parts that have changed.
     anim = animation.FuncAnimation(fig, animate, init_func=init,

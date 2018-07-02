@@ -64,17 +64,33 @@ class map_1_basic(object):
         self.state_idx = self.state_idx + 1
         return control
 
-    def move(self, robot_pos):
-        control = self.get_control()
+    def perform_control(self, pos, control):
+        nx = pos[0] + np.where(pos[2] > 0.5 * np.pi and pos[2] < 3.0 / 2.0 * np.pi, -control[0], control[0])
+        ny = pos[1] + np.where(pos[2] <= np.pi, control[1], -control[1])
+        ntheta = (2 * np.pi + pos[2] + control[2]) % (2 * np.pi)
 
-        nx = robot_pos[0] + np.where(robot_pos[2] > 0.5*np.pi and robot_pos[2] < 3.0/2.0*np.pi, -control[0], control[0])
-        ny = robot_pos[1] + np.where(robot_pos[2] <= np.pi, control[1], -control[1])
-        ntheta = (2*np.pi + robot_pos[2] + control[2]) % (2*np.pi)
-        new_state = (nx, ny, ntheta)
+        nx = nx + np.random.normal(0, config.SYSTEM_MOVEMENT_NOISE[0])
+        ny = ny + np.random.normal(0, config.SYSTEM_MOVEMENT_NOISE[1])
+        ntheta = ntheta + np.random.normal(0, config.SYSTEM_MOVEMENT_NOISE[2])
 
-        v = (nx - robot_pos[0], ny - robot_pos[1])
+        new_state = (
+            nx,
+            ny,
+            ntheta
+        )
 
-        return new_state, control, v
+        v = (nx - pos[0], ny - pos[1])
+
+        return new_state, v
+
+    def vperform_control(self, vpos, control):
+        new_state, new_v = np.zeros(vpos.shape), np.zeros((vpos.shape[0], 2))
+
+        for i in range(vpos.shape[0]):
+            new_state[i], new_v[i] = self.perform_control(vpos[i], control)
+
+        return new_state, new_v
+
 
     def raytracing(self, src, dest, num_samples=100, threshold=0.7):
         logging.debug('src %s -> dest %s ' % (','.join(src.astype(str)), ','.join(dest.astype(str))))
