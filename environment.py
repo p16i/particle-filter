@@ -15,13 +15,13 @@ logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:
     datefmt='%d-%m-%Y:%H:%M:%S',
     level=config.LOG_LEVEL)
 
-class map_1_basic(object):
-    def __init__(self, no_particles=20):
+class Environment(object):
+    def __init__(self, scene_name, no_particles=20):
 
-        self.scene_name = 'scene-1'
+        self.scene_name = scene_name
         self.no_particles = no_particles
 
-        map_name = 'map_1.png'
+        map_name = 'scenes/%s.png' % self.scene_name
         self.map = mpimg.imread(map_name)[::-1, :, 0]
 
         mark = np.ones((config.ROBOT_DIAMETER, config.ROBOT_DIAMETER))
@@ -36,20 +36,13 @@ class map_1_basic(object):
         self.map_with_safe_boundary = np.copy(self.map)
         self.map_with_safe_boundary[self.convolve_mark > threshold] = 0.0 # zero is obstacle.
 
-        self.landmarks = [
-            (165, 100-20, 2*np.pi-0.5*np.pi),
-            (165, 100-80, np.pi), # next move theta
-            (35, 100-80, 0.5*np.pi),
-            (35, 100-60, 0.0),
-            (110, 100-60, 0.5*np.pi),
-            (110, 100-40, np.pi),
-            (20, 100-40, np.pi),
-        ]
+        self.landmarks = config.SCENCES[scene_name]['landmarks']
 
-        self.controls = map_1_basic._build_control(self.landmarks)
+        self.controls = Environment._build_control(self.landmarks)
+
         self.total_frames = len(self.controls)
 
-        self.no_sensors = 11
+        self.no_sensors = config.SYSTEM_NO_SENSORS
         self.radar_thetas = (np.arange(0, self.no_sensors) - self.no_sensors // 2)*(np.pi/self.no_sensors)
 
         logging.info('we have %d controls' % len(self.controls))
@@ -73,14 +66,26 @@ class map_1_basic(object):
         self.state_idx = self.state_idx + 1
         return control
 
-    def perform_control(self, pos, control):
-        nx = pos[0] + np.where(pos[2] > 0.5 * np.pi and pos[2] < 3.0 / 2.0 * np.pi, -control[0], control[0])
-        ny = pos[1] + np.where(pos[2] <= np.pi, control[1], -control[1])
-        ntheta = (2 * np.pi + pos[2] + control[2]) % (2 * np.pi)
+    def perform_control(self, pos, control, noisy_env=True):
 
-        nx = nx + np.random.normal(0, config.SYSTEM_MOTION_NOISE[0])
-        ny = ny + np.random.normal(0, config.SYSTEM_MOTION_NOISE[1])
-        ntheta = ntheta + np.random.normal(0, config.SYSTEM_MOTION_NOISE[2])
+        robot_thetha = pos[2] + control[2]
+        control = np.array(control)
+        theta_control = np.arctan2(control[1], control[0])
+        diff_theta = robot_thetha - theta_control
+
+        c, s = np.cos(diff_theta), np.sin(diff_theta)
+        rot = np.array(((c, -s), (s, c)))
+        vcontrol = rot.dot(control[:2])
+        nx = pos[0] + vcontrol[0]
+        ny = pos[1] + vcontrol[1]
+
+        if noisy_env:
+            nx = nx + np.random.normal(0, config.SYSTEM_MOTION_NOISE[0])
+            ny = ny + np.random.normal(0, config.SYSTEM_MOTION_NOISE[1])
+
+        v = (nx - pos[0], ny - pos[1])
+
+        ntheta = np.arctan2(v[1], v[0])
 
         new_state = (
             nx,
@@ -88,7 +93,15 @@ class map_1_basic(object):
             ntheta
         )
 
-        v = (nx - pos[0], ny - pos[1])
+        logging.debug('-------')
+        logging.debug('control')
+        logging.debug(control)
+        logging.debug('v')
+        logging.debug(v)
+        logging.debug('old state')
+        logging.debug(pos)
+        logging.debug("new state")
+        logging.debug(new_state)
 
         return new_state, v
 
@@ -100,7 +113,7 @@ class map_1_basic(object):
 
         return new_state, new_v
 
-    def raytracing(self, src, dest, num_samples=100):
+    def raytracing(self, src, dest, num_samples=10):
         logging.debug('src %s -> dest %s ' % (','.join(src.astype(str)), ','.join(dest.astype(str))))
 
         dx = np.where(src[0] < dest[0], 1, -1)
@@ -163,8 +176,6 @@ class map_1_basic(object):
 
         return radar_src, radar_dest
 
-        # d = scene.raytracing(robot_pos[:2], radar_dest[:, 3])
-
     def measurement_model(self, pos, observed_measurements):
         if self.map_with_safe_boundary[int(pos[1]), int(pos[0])] < config.SYSTEM_MAP_OCCUPIED_AREA_THRESHOLD:
             return 0.0
@@ -172,7 +183,7 @@ class map_1_basic(object):
         radar_src, radar_dest = self.build_radar_beams(pos)
         noise_free_measurements, _, radar_rays = self.vraytracing(radar_src, radar_dest)
 
-        particle_measurements = noise_free_measurements + np.random.normal(0, config.SYSTEM_MEASURE_MODEL_LOCAL_NOISE_STD, noise_free_measurements.shape[0])
+        particle_measurements = noise_free_measurements
 
         q = 1
         for i in range(particle_measurements.shape[0]):

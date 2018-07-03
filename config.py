@@ -1,21 +1,23 @@
 import numpy as np
 import logging
 
-SYSTEM_MOTION_NOISE = [0.05, 0.05, 0.00]
-SYSTEM_MEASURE_MODEL_LOCAL_NOISE_STD = 2
+SYSTEM_MOTION_NOISE = [0.01, 0.01, 0.00]
+SYSTEM_MEASURE_MODEL_LOCAL_NOISE_STD = 5
 SYSTEM_MC_INTEGRAL_GRID = 1
 SYSTEM_MAP_OCCUPIED_AREA_THRESHOLD = 0.7 # 1 mean traversable
+SYSTEM_NO_SENSORS = 11
 
-ROBOT_MAX_MOVE_DISTANCE = 5
+ROBOT_MAX_MOVE_DISTANCE = 2.5
 ROBOT_DEFAULT_X = 0
 ROBOT_DEFAULT_Y = 0
 ROBOT_DEFAULT_THETA = np.pi / 2.0
 ROBOT_SYMBOL = 'bo'
 ROBOT_APPROXIMATED_SYMBOL = 'ro'
+ROBOT_APPROXIMATED_DIRECTION_LENGTH = 5
 ROBOT_SYMBOL_SIZE = 6
 ROBOT_STEP_SIZE = 0.3
 ROBOT_STEP_THETA_SIZE = np.pi / 2.0
-ROBOT_DIAMETER = 11
+ROBOT_DIAMETER = 5
 ROBOT_MOVEMENT_MODEL_PARAMS = [0.01, 0.01]
 
 
@@ -32,4 +34,18 @@ RADAR_WITDH = 0.5
 RADAR_MAX_LENGTH = 50
 RADAR_NOISE_STD = 0.2
 
-LOG_LEVEL=logging.INFO
+LOG_LEVEL = logging.INFO
+
+SCENCES = {
+    'scene-1': {
+        'landmarks': [
+            (165, 100-20, 2*np.pi-0.5*np.pi),
+            (165, 100-80, np.pi), # next move theta
+            (40, 100-80, 0.5*np.pi),
+            (40, 100-70, 0.0),
+            (110, 100-70, 0.5*np.pi),
+            (110, 100-35, np.pi),
+            (20, 100-35, np.pi),
+        ]
+    }
+}
