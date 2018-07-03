@@ -11,6 +11,7 @@ import scenes
 
 import logging
 
+
 logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
                     datefmt='%d-%m-%Y:%H:%M:%S',
                     level=config.LOG_LEVEL)
@@ -18,7 +19,7 @@ logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:
 robot_pos = None
 
 
-def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
+def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218, save=False):
     global robot_pos
 
     scene = getattr(scenes, scene)(no_particles)
@@ -35,12 +36,14 @@ def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
     ax.axis('off')
 
     background = ax.imshow(mm, origin='lower', cmap='gist_gray', vmax=1, vmin=0)
-    overlay = ax.imshow(scene.convolve_mark_overlay, origin='lower', cmap='gist_gray', vmax=1, vmin=0, alpha=0.0)
+    overlay = ax.imshow(scene.convolve_mark_overlay, origin='lower', cmap='gist_gray', vmax=1, vmin=0, alpha=0.1)
 
     no_particles_text = ax.text(0.02, 0.83, '', transform=ax.transAxes)
     time_text = ax.text(0.02, 0.90, '', transform=ax.transAxes)
 
     robot, = ax.plot([], [], config.ROBOT_SYMBOL, ms=config.ROBOT_SYMBOL_SIZE)
+    approximated_robot, = ax.plot([], [], config.ROBOT_APPROXIMATED_SYMBOL, ms=config.ROBOT_SYMBOL_SIZE,
+                                  alpha=config.PARTICLE_OPACITY)
     particles, = ax.plot([], [], config.PARTICLE_SYMBOL, ms=config.PARTICLE_SYMBOL_SIZE, alpha=config.PARTICLE_OPACITY)
 
     sensors = ax.quiver([], [], [], [],
@@ -64,73 +67,65 @@ def main(scene, no_particles=2000, frame_interval=50, monitor_dpi=218):
 
     # animation function.  This is called sequentially
     def animate(i):
+        if i % 10 == 0:
+            logging.info('step %d' % i)
+
         global robot_pos
+
         time_text.set_text('Time = %4d' % (i+1))
         no_particles_text.set_text('No. Particles = %d' % no_particles)
 
         control = scene.get_control()
-        robot_pos, v = scene.perform_control(robot_pos, control)
+        robot_pos, _ = scene.perform_control(robot_pos, control)
 
-        radar_src = np.array([[robot_pos[0]]*scene.no_sensors, [robot_pos[1]]*scene.no_sensors])
+        radar_src, radar_dest = scene.build_radar_beams(robot_pos)
 
-        radar_theta = scene.radar_thetas + robot_pos[2]
-        radar_rel_dest = np.stack(
-            (
-            np.cos(radar_theta)*config.RADAR_MAX_LENGTH,
-            np.sin(radar_theta)*config.RADAR_MAX_LENGTH
-            ), axis=0
-        )
-
-        radar_dest = np.zeros(radar_rel_dest.shape)
-        radar_dest[0, :] = np.clip(radar_rel_dest[0, :] + radar_src[0, :], 0, mm.shape[1])
-        radar_dest[1, :] = np.clip(radar_rel_dest[1, :] + radar_src[1, :], 0, mm.shape[0])
-
-        # d = scene.raytracing(robot_pos[:2], radar_dest[:, 3])
-        logging.debug('rel dist from analytic')
-        logging.debug(radar_rel_dest.T)
         noise_free_measurements, _, radar_rays = scene.vraytracing(radar_src, radar_dest)
         logging.debug('Measurements:')
         logging.debug(noise_free_measurements)
 
-        sensors = ax.quiver(
-            radar_src[0, :],
-            radar_src[1, :],
-            radar_rays[0, :],
-            radar_rays[1, :],
-            scale=1, units='xy', color=config.RADAR_COLOR, pivot='tail', angles='uv',
-            headlength=0, headwidth=0,
-            width=config.RADAR_WITDH)
+        noisy_measurements = noise_free_measurements + np.random.normal(0, config.RADAR_NOISE_STD, noise_free_measurements.shape[0])
+
+        sensors.set_UVC(radar_rays[0, :], radar_rays[1, :])
+        sensors.set_offsets(radar_src.T)
+
 
         robot.set_data([robot_pos[0]], [robot_pos[1]])
 
         particle_positions, particle_velocities = scene.vperform_control(scene.particles, control)
 
-        # todo: measure model ( important weigthings )
-        important_weigthings = np.ones(particle_positions.shape[0]) / particle_positions.shape[0]
+        is_weight_valid, important_weights = scene.vmeasurement_model(particle_positions, noisy_measurements)
 
-        particle_resampling_indicies = np.random.choice(particle_positions.shape[0], particle_positions.shape[0],
-                                                        replace=True, p=important_weigthings)
-
-        particle_resampling = particle_positions[particle_resampling_indicies]
+        if is_weight_valid:
+            particle_resampling_indicies = np.random.choice(particle_positions.shape[0], particle_positions.shape[0],
+                                                            replace=True, p=important_weights)
+            particle_resampling = particle_positions[particle_resampling_indicies]
+        else:
+            particle_resampling = scene.uniform_sample_particles()
 
         scene.particles = particle_resampling
 
         particles.set_data(scene.particles[:, 0], scene.particles[:, 1])
 
-        pariticle_directions = ax.quiver(
-            scene.particles[:, 0], scene.particles[:, 1],
+        particle_directions.set_UVC(
             np.cos(scene.particles[:, 2])*config.PARTICLE_DIRECTION_DISTANCE,
             np.sin(scene.particles[:, 2])*config.PARTICLE_DIRECTION_DISTANCE,
-            scale=1, units='xy', color='r', alpha=config.PARTICLE_OPACITY,
-            width=config.RADAR_WITDH)
+        )
 
-        return background, overlay, particles, time_text, no_particles_text, pariticle_directions, robot, sensors
+        particle_directions.set_offsets(scene.particles[:, :2])
 
-    # call the animator.  blit=True means only re-draw the parts that have changed.
+        approximated_robot.set_data([np.mean(scene.particles[:, 0])], [np.mean(scene.particles[:, 1])])
+
+        return background, overlay, particles, time_text, no_particles_text, robot, sensors, particle_directions, approximated_robot
+
     anim = animation.FuncAnimation(fig, animate, init_func=init,
-                                   frames=scene.total_frames, interval=frame_interval, blit=True, repeat=False)
+                                   frames=scene.total_frames-1, interval=frame_interval, blit=True, repeat=False)
 
-    plt.show()
+    if save:
+        anim.save('experiments/%s-%d-particles.mp4' % (scene.scene_name, no_particles), fps=15,
+                  extra_args=['-vcodec', 'libx264'])
+    else:
+        plt.show()
 
 if __name__ == '__main__':
     fire.Fire(main)

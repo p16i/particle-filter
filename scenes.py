@@ -2,7 +2,12 @@ import numpy as np
 import config
 import matplotlib.image as mpimg
 from scipy import signal
+from functools import partial
+from multiprocessing import Pool
 
+
+
+from scipy import stats
 
 import logging
 
@@ -13,6 +18,7 @@ logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:
 class map_1_basic(object):
     def __init__(self, no_particles=20):
 
+        self.scene_name = 'scene-1'
         self.no_particles = no_particles
 
         map_name = 'map_1.png'
@@ -32,12 +38,12 @@ class map_1_basic(object):
 
         self.landmarks = [
             (165, 100-20, 2*np.pi-0.5*np.pi),
-            (165, 100-74, np.pi), # next move theta
-            (34, 100-74, 0.5*np.pi),
-            (34, 100-63, 0.0),
-            (108, 100-63, 0.5*np.pi),
-            (108, 100-33, np.pi),
-            (24, 100-33, np.pi),
+            (165, 100-80, np.pi), # next move theta
+            (35, 100-80, 0.5*np.pi),
+            (35, 100-60, 0.0),
+            (110, 100-60, 0.5*np.pi),
+            (110, 100-40, np.pi),
+            (20, 100-40, np.pi),
         ]
 
         self.controls = map_1_basic._build_control(self.landmarks)
@@ -47,17 +53,20 @@ class map_1_basic(object):
         self.radar_thetas = (np.arange(0, self.no_sensors) - self.no_sensors // 2)*(np.pi/self.no_sensors)
 
         logging.info('we have %d controls' % len(self.controls))
-        # print(self.controls)
 
         self.traversable_area = np.stack(np.nonzero(1 - (self.map_with_safe_boundary.T < 0.7)), axis=1)
+
+        self.particles = self.uniform_sample_particles()
+
+        self.state_idx = 0
+
+    def uniform_sample_particles(self):
         particles_xy_indices = np.random.choice(self.traversable_area.shape[0], size=self.no_particles, replace=True)
         particles_xy = self.traversable_area[particles_xy_indices]
 
         particles_theta = np.random.uniform(0.0, 2*np.pi, (self.no_particles, 1))
 
-        self.particles = np.hstack([particles_xy, particles_theta])
-
-        self.state_idx = 0
+        return np.hstack([particles_xy, particles_theta])
 
     def get_control(self):
         control = self.controls[self.state_idx]
@@ -69,9 +78,9 @@ class map_1_basic(object):
         ny = pos[1] + np.where(pos[2] <= np.pi, control[1], -control[1])
         ntheta = (2 * np.pi + pos[2] + control[2]) % (2 * np.pi)
 
-        nx = nx + np.random.normal(0, config.SYSTEM_MOVEMENT_NOISE[0])
-        ny = ny + np.random.normal(0, config.SYSTEM_MOVEMENT_NOISE[1])
-        ntheta = ntheta + np.random.normal(0, config.SYSTEM_MOVEMENT_NOISE[2])
+        nx = nx + np.random.normal(0, config.SYSTEM_MOTION_NOISE[0])
+        ny = ny + np.random.normal(0, config.SYSTEM_MOTION_NOISE[1])
+        ntheta = ntheta + np.random.normal(0, config.SYSTEM_MOTION_NOISE[2])
 
         new_state = (
             nx,
@@ -91,8 +100,7 @@ class map_1_basic(object):
 
         return new_state, new_v
 
-
-    def raytracing(self, src, dest, num_samples=100, threshold=0.7):
+    def raytracing(self, src, dest, num_samples=100):
         logging.debug('src %s -> dest %s ' % (','.join(src.astype(str)), ','.join(dest.astype(str))))
 
         dx = np.where(src[0] < dest[0], 1, -1)
@@ -106,7 +114,7 @@ class map_1_basic(object):
         mark = np.zeros(self.map.shape)
         mark[y_steps_int, x_steps_int] = 1
 
-        collided_map = self.map[y_steps_int, x_steps_int] < threshold
+        collided_map = self.map[y_steps_int, x_steps_int] < config.SYSTEM_MAP_OCCUPIED_AREA_THRESHOLD
 
         if np.sum(collided_map) > 0:
             collisions = np.nonzero(collided_map)
@@ -138,8 +146,70 @@ class map_1_basic(object):
 
         return distances, positions, rel_positions
 
+    def build_radar_beams(self, pos):
+        radar_src = np.array([[pos[0]] * self.no_sensors, [pos[1]] * self.no_sensors])
+
+        radar_theta = self.radar_thetas + pos[2]
+        radar_rel_dest = np.stack(
+            (
+                np.cos(radar_theta)*config.RADAR_MAX_LENGTH,
+                np.sin(radar_theta)*config.RADAR_MAX_LENGTH
+            ), axis=0
+        )
+
+        radar_dest = np.zeros(radar_rel_dest.shape)
+        radar_dest[0, :] = np.clip(radar_rel_dest[0, :] + radar_src[0, :], 0, self.map.shape[1])
+        radar_dest[1, :] = np.clip(radar_rel_dest[1, :] + radar_src[1, :], 0, self.map.shape[0])
+
+        return radar_src, radar_dest
+
+        # d = scene.raytracing(robot_pos[:2], radar_dest[:, 3])
+
+    def measurement_model(self, pos, observed_measurements):
+        if self.map_with_safe_boundary[int(pos[1]), int(pos[0])] < config.SYSTEM_MAP_OCCUPIED_AREA_THRESHOLD:
+            return 0.0
+
+        radar_src, radar_dest = self.build_radar_beams(pos)
+        noise_free_measurements, _, radar_rays = self.vraytracing(radar_src, radar_dest)
+
+        particle_measurements = noise_free_measurements + np.random.normal(0, config.SYSTEM_MEASURE_MODEL_LOCAL_NOISE_STD, noise_free_measurements.shape[0])
+
+        q = 1
+        for i in range(particle_measurements.shape[0]):
+            q = q * self._measurement_model_p_hit(observed_measurements[i], particle_measurements[i])
+
+        return q
+
+    def vmeasurement_model(self, positions, observed_measurements):
+        # return np.ones(positions.shape[0]) / positions.shape[0]
+
+        mm = partial(self.measurement_model, observed_measurements=observed_measurements)
+
+        positions = [positions[i] for i in range(positions.shape[0])]
+
+        with Pool(10) as p:
+            weights = p.map(mm, positions)
+
+        weights = np.array(weights)
+        total_weights = np.sum(weights)
+
+        if total_weights == 0:
+            logging.debug('all weights are zero')
+            return False, None
+        else:
+            return True, weights / total_weights
 
 
+    @classmethod
+    def _measurement_model_p_hit(cls, z, z_star):
+        pdf_z = partial(stats.norm.pdf, loc=z_star, scale=config.SYSTEM_MEASURE_MODEL_LOCAL_NOISE_STD)
+        prob_z = pdf_z(z)
+
+        mc_grids = np.arange(0, config.RADAR_MAX_LENGTH + config.SYSTEM_MC_INTEGRAL_GRID, config.SYSTEM_MC_INTEGRAL_GRID)
+
+        normalizers = np.sum([pdf_z(x) for x in mc_grids])
+
+        return prob_z / normalizers
 
     @staticmethod
     def _build_control(landmarks):
