@@ -57,9 +57,10 @@ class Environment(object):
         particles_xy_indices = np.random.choice(self.traversable_area.shape[0], size=self.no_particles, replace=True)
         particles_xy = self.traversable_area[particles_xy_indices]
 
-        particles_theta = np.random.uniform(0.0, 2*np.pi, (self.no_particles, 1))
+        particles_theta = np.random.uniform(0.0, 2*np.pi, (self.no_particles, 1)) % (2*np.pi)
 
-        return np.hstack([particles_xy, particles_theta])
+        res = np.hstack([particles_xy, particles_theta])
+        return res
 
     def get_control(self):
         control = self.controls[self.state_idx]
@@ -109,7 +110,7 @@ class Environment(object):
         new_state, new_v = np.zeros(vpos.shape), np.zeros((vpos.shape[0], 2))
 
         for i in range(vpos.shape[0]):
-            new_state[i], new_v[i] = self.perform_control(vpos[i], control)
+            new_state[i], new_v[i] = self.perform_control(vpos[i], control, noisy_env=False)
 
         return new_state, new_v
 

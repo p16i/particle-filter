@@ -74,6 +74,7 @@ def main(scene, no_particles=2000, total_frames=None, frame_interval=50, show_pa
 
         global robot_pos
 
+
         time_text.set_text('Time = %4d/%4d' % (i+1, scene.total_frames))
         no_particles_text.set_text('No. Particles = %d' % no_particles)
 
@@ -100,6 +101,7 @@ def main(scene, no_particles=2000, total_frames=None, frame_interval=50, show_pa
             is_weight_valid, important_weights = scene.vmeasurement_model(particle_positions, noisy_measurements)
 
             if is_weight_valid:
+                # logging.info(','.join(map(lambda x : '%.4f' % x, important_weights)))
                 particle_resampling_indicies = np.random.choice(particle_positions.shape[0], particle_positions.shape[0],
                                                                 replace=True, p=important_weights)
                 particle_resampling = particle_positions[particle_resampling_indicies]
@@ -110,13 +112,12 @@ def main(scene, no_particles=2000, total_frames=None, frame_interval=50, show_pa
 
             particles.set_data(scene.particles[:, 0], scene.particles[:, 1])
 
-            avg_particle_theta = np.mean(scene.particles[:, 2])
             particle_directions.set_UVC(
-                np.cos(avg_particle_theta)*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
-                np.sin(avg_particle_theta)*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
+                np.cos(scene.particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
+                np.sin(scene.particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
             )
 
-            particle_directions.set_offsets(np.mean(scene.particles[:, :2], axis=0))
+            particle_directions.set_offsets(scene.particles[:, :2])
 
             approximated_robot_x, approximated_robot_y = np.mean(scene.particles[:, 0]), np.mean(scene.particles[:, 1])
             approximated_robot.set_data([approximated_robot_x], [approximated_robot_y])
@@ -139,7 +140,7 @@ def main(scene, no_particles=2000, total_frames=None, frame_interval=50, show_pa
 
     if save:
         name = '%s-%d-particles' % (scene.scene_name, no_particles)
-        anim.save('experiments/%s.mp4' % name, fps=15,
+        anim.save('experiments/%s.mp4' % name, fps=10,
                   extra_args=['-vcodec', 'libx264'])
 
         fig2 = plt.figure()
