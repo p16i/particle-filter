@@ -15,6 +15,7 @@ logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:
     datefmt='%d-%m-%Y:%H:%M:%S',
     level=config.LOG_LEVEL)
 
+
 class Environment(object):
     def __init__(self, scene_name, no_particles=20):
 
@@ -49,15 +50,17 @@ class Environment(object):
 
         self.traversable_area = np.stack(np.nonzero(1 - (self.map_with_safe_boundary.T < 0.7)), axis=1)
 
-        self.particles = self.uniform_sample_particles()
+        self.particles = self.uniform_sample_particles(self.no_particles)
 
         self.state_idx = 0
 
-    def uniform_sample_particles(self):
-        particles_xy_indices = np.random.choice(self.traversable_area.shape[0], size=self.no_particles, replace=True)
+        self._vmeasurement_model_p_hit = np.vectorize(self._measurement_model_p_hit)
+
+    def uniform_sample_particles(self, no_particles):
+        particles_xy_indices = np.random.choice(self.traversable_area.shape[0], size=no_particles, replace=True)
         particles_xy = self.traversable_area[particles_xy_indices]
 
-        particles_theta = np.random.uniform(0.0, 2*np.pi, (self.no_particles, 1)) % (2*np.pi)
+        particles_theta = np.random.uniform(0.0, 2*np.pi, (no_particles, 1)) % (2*np.pi)
 
         res = np.hstack([particles_xy, particles_theta])
         return res
@@ -110,7 +113,7 @@ class Environment(object):
         new_state, new_v = np.zeros(vpos.shape), np.zeros((vpos.shape[0], 2))
 
         for i in range(vpos.shape[0]):
-            new_state[i], new_v[i] = self.perform_control(vpos[i], control, noisy_env=False)
+            new_state[i], new_v[i] = self.perform_control(vpos[i], control, noisy_env=True)
 
         return new_state, new_v
 
@@ -186,18 +189,15 @@ class Environment(object):
 
         particle_measurements = noise_free_measurements
 
-        q = 1
-        for i in range(particle_measurements.shape[0]):
-            q = q * self._measurement_model_p_hit(observed_measurements[i], particle_measurements[i])
+        qs = self._vmeasurement_model_p_hit(observed_measurements, particle_measurements)
 
-        return q
+        return np.prod(qs)
 
     def vmeasurement_model(self, positions, observed_measurements):
-        # return np.ones(positions.shape[0]) / positions.shape[0]
-
         mm = partial(self.measurement_model, observed_measurements=observed_measurements)
 
-        positions = [positions[i] for i in range(positions.shape[0])]
+        # positions = [positions[i] for i in range(positions.shape[0])]
+        positions = positions.tolist()
 
         with Pool(10) as p:
             weights = p.map(mm, positions)
@@ -214,14 +214,13 @@ class Environment(object):
 
     @classmethod
     def _measurement_model_p_hit(cls, z, z_star):
-        pdf_z = partial(stats.norm.pdf, loc=z_star, scale=config.SYSTEM_MEASURE_MODEL_LOCAL_NOISE_STD)
-        prob_z = pdf_z(z)
+        dd = np.concatenate([config.SYSTEM_MC_GRIDS, [z]])
 
-        mc_grids = np.arange(0, config.RADAR_MAX_LENGTH + config.SYSTEM_MC_INTEGRAL_GRID, config.SYSTEM_MC_INTEGRAL_GRID)
+        prob = stats.norm.pdf(dd, loc=z_star, scale=config.SYSTEM_MEASURE_MODEL_LOCAL_NOISE_STD)
 
-        normalizers = np.sum([pdf_z(x) for x in mc_grids])
+        normalizers = np.sum(prob[:-1])
 
-        return prob_z / normalizers
+        return prob[-1] / normalizers
 
     @staticmethod
     def _build_control(landmarks):

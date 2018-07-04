@@ -16,9 +16,11 @@ logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:
 robot_pos = None
 
 distance_differences = []
+angle_differences = []
 
 
-def main(scene, no_particles=2000, total_frames=None, frame_interval=50, show_particles=True, save=False):
+def main(scene, no_particles=10, total_frames=None, frame_interval=50, show_particles=True, save=False,
+         no_random_particles=0):
     global robot_pos
 
     scene = environment.Environment(scene, no_particles)
@@ -29,10 +31,10 @@ def main(scene, no_particles=2000, total_frames=None, frame_interval=50, show_pa
     fig = plt.figure()
     ax = plt.axes(xlim=(0, mm.shape[1]), ylim=(0, mm.shape[0]))
 
-    ax.set_yticks([])
-    ax.set_xticks([])
+    ax.set_yticks([0, mm.shape[0]])
+    ax.set_xticks([0, mm.shape[1]])
     # fig.patch.set_visible(False)
-    ax.axis('off')
+    # ax.axis('off')
 
     background = ax.imshow(mm, origin='lower', cmap='gist_gray', vmax=1, vmin=0)
     overlay = ax.imshow(scene.convolve_mark_overlay, origin='lower', cmap='gist_gray', vmax=1, vmin=0, alpha=0.1)
@@ -43,40 +45,40 @@ def main(scene, no_particles=2000, total_frames=None, frame_interval=50, show_pa
     robot, = ax.plot([], [], config.ROBOT_SYMBOL, ms=config.ROBOT_SYMBOL_SIZE)
     approximated_robot, = ax.plot([], [], config.ROBOT_APPROXIMATED_SYMBOL, ms=config.ROBOT_SYMBOL_SIZE,
                                   alpha=config.PARTICLE_OPACITY)
-    # print(scene.particles.shape)
+
     particles, = ax.plot(scene.particles[:, 0], scene.particles[:, 1], config.PARTICLE_SYMBOL,
                          ms=config.PARTICLE_SYMBOL_SIZE, alpha=config.PARTICLE_OPACITY)
+    particle_directions = ax.quiver([], [], [], [], scale=1, units='xy', color='r', width=config.RADAR_WITDH)
 
     sensors = ax.quiver([], [], [], [],
                         scale=1, units='xy', color=config.RADAR_COLOR,
                         headlength=0, headwidth=0,
                         width=config.RADAR_WITDH)
 
-    particle_directions = ax.quiver([], [], [], [], scale=1, units='xy', color='r', width=config.RADAR_WITDH)
+    view_random_particles, = ax.plot([], [], 'ko', ms=config.PARTICLE_SYMBOL_SIZE,
+                                alpha=config.PARTICLE_OPACITY)
+    view_random_particle_directions = ax.quiver([], [], [], [], scale=1, units='xy', color='k', width=config.RADAR_WITDH)
 
-    # initialization function: plot the background of each frame
+
     def init():
         robot.set_data([], [])
-        # particles.set_data([], [])
 
         time_text.set_text('')
         no_particles_text.set_text('')
 
         return background, overlay, robot, particles, time_text, no_particles_text, particle_directions
 
-    # animation function.  This is called sequentially
     def animate(i):
-        # if i < 10:
-        #     return background, overlay, robot, particles, time_text, no_particles_text, particle_directions
+        global robot_pos, distance_differences, angle_differences
 
-        # if i % 10 == 0:
         logging.info('>>>>> step %d/%d' % (i+1, scene.total_frames))
 
-        global robot_pos
-
-
         time_text.set_text('Time = %4d/%4d' % (i+1, scene.total_frames))
-        no_particles_text.set_text('No. Particles = %d' % no_particles)
+
+        particle_label = 'No. Particles = %d' % no_particles
+        if no_random_particles > 0:
+            particle_label = '%s + %d' % (particle_label, no_random_particles)
+        no_particles_text.set_text(particle_label)
 
         control = scene.get_control()
         robot_pos, _ = scene.perform_control(robot_pos, control)
@@ -92,7 +94,6 @@ def main(scene, no_particles=2000, total_frames=None, frame_interval=50, show_pa
         sensors.set_UVC(radar_rays[0, :], radar_rays[1, :])
         sensors.set_offsets(radar_src.T)
 
-
         robot.set_data([robot_pos[0]], [robot_pos[1]])
 
         if show_particles:
@@ -106,33 +107,48 @@ def main(scene, no_particles=2000, total_frames=None, frame_interval=50, show_pa
                                                                 replace=True, p=important_weights)
                 particle_resampling = particle_positions[particle_resampling_indicies]
             else:
-                particle_resampling = scene.uniform_sample_particles()
+                particle_resampling = scene.uniform_sample_particles(no_particles)
 
             scene.particles = particle_resampling
 
             particles.set_data(scene.particles[:, 0], scene.particles[:, 1])
 
-            particle_directions.set_UVC(
-                np.cos(scene.particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
-                np.sin(scene.particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
-            )
+            position_differences = scene.particles[:, :2] - np.array(robot_pos)[:2]
 
-            particle_directions.set_offsets(scene.particles[:, :2])
+            dists = np.sum(np.abs(position_differences) ** 2, axis=-1) ** (1. / 2)
+
+            distance_differences.append((np.mean(dists), np.std(dists)))
+
+            angle_diffs = np.abs(scene.particles[:, 2] - robot_pos[2]) % (2*np.pi)
+            angle_differences.append((np.mean(angle_diffs), np.std(angle_diffs)))
 
             approximated_robot_x, approximated_robot_y = np.mean(scene.particles[:, 0]), np.mean(scene.particles[:, 1])
             approximated_robot.set_data([approximated_robot_x], [approximated_robot_y])
 
+            particle_directions.set_UVC(
+                np.cos(scene.particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
+                np.sin(scene.particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
+                )
+            particle_directions.set_offsets(scene.particles[:, :2])
 
-            mat = scene.particles - np.array(robot_pos)
+            if no_random_particles > 0 and (i + 1) % 10 == 0:
+                random_particles = scene.uniform_sample_particles(no_random_particles)
 
-            dists = np.sum(np.abs(mat) ** 2, axis=-1) ** (1. / 2)
+                view_random_particles.set_data(random_particles[:, 0], random_particles[:, 1])
+                view_random_particle_directions.set_UVC(
+                    np.cos(random_particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
+                    np.sin(random_particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
+                    )
+                view_random_particle_directions.set_offsets(random_particles[:, :2])
 
-            mean, std = np.mean(dists), np.std(dists)
+                scene.particles = np.vstack((scene.particles, random_particles))
+            else:
+                view_random_particles.set_data([], [])
+                view_random_particle_directions.set_UVC([], [])
+                view_random_particle_directions.set_offsets([])
 
-            global distance_differences
-            distance_differences.append((mean, std))
-
-        return background, overlay, particles, time_text, no_particles_text, robot, sensors, approximated_robot, particle_directions,
+        return background, overlay, particles, time_text, no_particles_text, robot, sensors, approximated_robot, \
+               particle_directions, view_random_particles, view_random_particle_directions
 
     total_frames = scene.total_frames if total_frames is None else total_frames
     anim = animation.FuncAnimation(fig, animate, init_func=init,
@@ -140,25 +156,47 @@ def main(scene, no_particles=2000, total_frames=None, frame_interval=50, show_pa
 
     if save:
         name = '%s-%d-particles' % (scene.scene_name, no_particles)
+
+        if no_random_particles > 0:
+            name = '%s-with-rp-%d' % (name, no_random_particles)
+
         anim.save('experiments/%s.mp4' % name, fps=10,
                   extra_args=['-vcodec', 'libx264'])
 
-        fig2 = plt.figure()
-        ax2 = plt.axes()
+        fig2, res_ax = plt.subplots(nrows=2, ncols=1, sharex=True)
 
-        global distance_differences
+        global distance_differences, angle_differences
 
         distance_differences = np.array(distance_differences)
+        angle_differences = np.array(angle_differences)
 
         x = np.arange(distance_differences.shape[0])
         y = distance_differences[:, 0]
         std = distance_differences[:, 1]
-        ax2.plot(x, y)
-        ax2.fill_between(x, y - std, y + std, alpha=0.5)
+        res_ax[0].plot(x, y)
+        res_ax[0].fill_between(x, y - std, y + std, alpha=0.5)
 
-        ax2.set_ylabel("Distance Difference")
-        ax2.set_xlabel("Time")
-        ax2.set_yticks(np.linspace(0, np.linalg.norm(scene.map.shape[:2])*0.75, 5))
+        res_ax[0].set_ylabel("Position Difference")
+        res_ax[0].set_yticks(np.linspace(0, np.linalg.norm(scene.map.shape[:2])*0.75, 5))
+
+        x = np.arange(angle_differences.shape[0])
+        y = angle_differences[:, 0]
+        std = angle_differences[:, 1]
+        res_ax[1].plot(x, y)
+        res_ax[1].fill_between(x, y - std, y + std, alpha=0.5)
+
+        res_ax[1].set_ylabel("Angle Difference")
+        res_ax[1].set_xlabel("Time")
+        res_ax[1].set_yticks([0, np.pi, 2*np.pi])
+        res_ax[1].set_yticklabels(['0', '$\pi$', '$2\pi$'])
+
+        title = '%d particles' % no_particles
+
+        if no_random_particles > 0:
+            title = '%s\n (with %d random particles every 10 steps)' % (title, no_random_particles)
+
+        fig2.suptitle(title)
+
         fig2.savefig('experiments/%s.png' % name)
     else:
         plt.show()
