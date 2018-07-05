@@ -22,7 +22,7 @@ class Environment(object):
         self.scene_name = scene_name
         self.no_particles = no_particles
 
-        map_name = 'scenes/%s.png' % self.scene_name
+        map_name = 'scenes/%s.png' % config.SCENCES[self.scene_name]['map']
         self.map = mpimg.imread(map_name)[::-1, :, 0]
 
         mark = np.ones((config.ROBOT_DIAMETER, config.ROBOT_DIAMETER))
@@ -37,11 +37,11 @@ class Environment(object):
         self.map_with_safe_boundary = np.copy(self.map)
         self.map_with_safe_boundary[self.convolve_mark > threshold] = 0.0 # zero is obstacle.
 
-        self.landmarks = config.SCENCES[scene_name]['landmarks']
+        self.paths = config.SCENCES[scene_name]['paths']
 
-        self.controls = Environment._build_control(self.landmarks)
+        self.controls = [Environment._build_control(l) for l in self.paths]
 
-        self.total_frames = len(self.controls)
+        self.total_frames = (len(self.paths) - 1) + np.sum([len(a) for a in self.controls])
 
         self.no_sensors = config.SYSTEM_NO_SENSORS
         self.radar_thetas = (np.arange(0, self.no_sensors) - self.no_sensors // 2)*(np.pi/self.no_sensors)
@@ -52,7 +52,10 @@ class Environment(object):
 
         self.particles = self.uniform_sample_particles(self.no_particles)
 
+        self.control_group_idx = 0
         self.state_idx = 0
+
+        self.total_move = 0
 
         self._vmeasurement_model_p_hit = np.vectorize(self._measurement_model_p_hit)
 
@@ -66,9 +69,22 @@ class Environment(object):
         return res
 
     def get_control(self):
-        control = self.controls[self.state_idx]
+        self.total_move = self.total_move + 1
+
+        logging.info('path %d' % self.control_group_idx)
+
+        if self.state_idx >= len(self.controls[self.control_group_idx]):
+            logging.info('..........')
+            self.control_group_idx = self.control_group_idx + 1
+            self.state_idx = 0
+            teleport_pos = self.paths[self.control_group_idx][0]
+            print(teleport_pos)
+            return teleport_pos, None
+
+        control = self.controls[self.control_group_idx][self.state_idx]
         self.state_idx = self.state_idx + 1
-        return control
+
+        return None, control
 
     def perform_control(self, pos, control, noisy_env=True):
 

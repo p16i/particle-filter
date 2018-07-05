@@ -26,7 +26,7 @@ def main(scene, no_particles=10, total_frames=None, frame_interval=50, show_part
     scene = environment.Environment(scene, no_particles)
     mm = scene.map
 
-    robot_pos = scene.landmarks[0]
+    robot_pos = scene.paths[0][0]
 
     fig = plt.figure()
     ax = plt.axes(xlim=(0, mm.shape[1]), ylim=(0, mm.shape[0]))
@@ -71,81 +71,85 @@ def main(scene, no_particles=10, total_frames=None, frame_interval=50, show_part
     def animate(i):
         global robot_pos, distance_differences, angle_differences
 
-        logging.info('>>>>> step %d/%d' % (i+1, scene.total_frames))
+        logging.info('>>>>> step %d/%d' % (scene.total_move+1, scene.total_frames))
 
-        time_text.set_text('Time = %4d/%4d' % (i+1, scene.total_frames))
+        time_text.set_text('Time = %4d/%4d' % (scene.total_move+1, scene.total_frames))
 
         particle_label = 'No. Particles = %d' % no_particles
         if no_random_particles > 0:
             particle_label = '%s + %d' % (particle_label, no_random_particles)
         no_particles_text.set_text(particle_label)
 
-        control = scene.get_control()
-        robot_pos, _ = scene.perform_control(robot_pos, control)
+        teleport_pos, control = scene.get_control()
 
-        radar_src, radar_dest = scene.build_radar_beams(robot_pos)
+        if teleport_pos:
+            robot_pos = teleport_pos
+        else:
+            robot_pos, _ = scene.perform_control(robot_pos, control)
 
-        noise_free_measurements, _, radar_rays = scene.vraytracing(radar_src, radar_dest)
-        logging.debug('Measurements:')
-        logging.debug(noise_free_measurements)
+            radar_src, radar_dest = scene.build_radar_beams(robot_pos)
 
-        noisy_measurements = noise_free_measurements + np.random.normal(0, config.RADAR_NOISE_STD, noise_free_measurements.shape[0])
+            noise_free_measurements, _, radar_rays = scene.vraytracing(radar_src, radar_dest)
+            logging.debug('Measurements:')
+            logging.debug(noise_free_measurements)
 
-        sensors.set_UVC(radar_rays[0, :], radar_rays[1, :])
-        sensors.set_offsets(radar_src.T)
+            noisy_measurements = noise_free_measurements + np.random.normal(0, config.RADAR_NOISE_STD, noise_free_measurements.shape[0])
+
+            sensors.set_UVC(radar_rays[0, :], radar_rays[1, :])
+            sensors.set_offsets(radar_src.T)
+
+            if show_particles:
+                particle_positions, particle_velocities = scene.vperform_control(scene.particles, control)
+
+                is_weight_valid, important_weights = scene.vmeasurement_model(particle_positions, noisy_measurements)
+
+                if is_weight_valid:
+                    # logging.info(','.join(map(lambda x : '%.4f' % x, important_weights)))
+                    particle_resampling_indicies = np.random.choice(particle_positions.shape[0], particle_positions.shape[0],
+                                                                    replace=True, p=important_weights)
+                    particle_resampling = particle_positions[particle_resampling_indicies]
+                else:
+                    particle_resampling = scene.uniform_sample_particles(no_particles)
+
+                scene.particles = particle_resampling
+
+                particles.set_data(scene.particles[:, 0], scene.particles[:, 1])
+
+                position_differences = scene.particles[:, :2] - np.array(robot_pos)[:2]
+
+                dists = np.sum(np.abs(position_differences) ** 2, axis=-1) ** (1. / 2)
+
+                distance_differences.append((np.mean(dists), np.std(dists)))
+
+                angle_diffs = np.abs(scene.particles[:, 2] - robot_pos[2]) % (2*np.pi)
+                angle_differences.append((np.mean(angle_diffs), np.std(angle_diffs)))
+
+                approximated_robot_x, approximated_robot_y = np.mean(scene.particles[:, 0]), np.mean(scene.particles[:, 1])
+                approximated_robot.set_data([approximated_robot_x], [approximated_robot_y])
+
+                particle_directions.set_UVC(
+                    np.cos(scene.particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
+                    np.sin(scene.particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
+                    )
+                particle_directions.set_offsets(scene.particles[:, :2])
+
+                if no_random_particles > 0 and (i + 1) % 10 == 0:
+                    random_particles = scene.uniform_sample_particles(no_random_particles)
+
+                    view_random_particles.set_data(random_particles[:, 0], random_particles[:, 1])
+                    view_random_particle_directions.set_UVC(
+                        np.cos(random_particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
+                        np.sin(random_particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
+                        )
+                    view_random_particle_directions.set_offsets(random_particles[:, :2])
+
+                    scene.particles = np.vstack((scene.particles, random_particles))
+                else:
+                    view_random_particles.set_data([], [])
+                    view_random_particle_directions.set_UVC([], [])
+                    view_random_particle_directions.set_offsets([])
 
         robot.set_data([robot_pos[0]], [robot_pos[1]])
-
-        if show_particles:
-            particle_positions, particle_velocities = scene.vperform_control(scene.particles, control)
-
-            is_weight_valid, important_weights = scene.vmeasurement_model(particle_positions, noisy_measurements)
-
-            if is_weight_valid:
-                # logging.info(','.join(map(lambda x : '%.4f' % x, important_weights)))
-                particle_resampling_indicies = np.random.choice(particle_positions.shape[0], particle_positions.shape[0],
-                                                                replace=True, p=important_weights)
-                particle_resampling = particle_positions[particle_resampling_indicies]
-            else:
-                particle_resampling = scene.uniform_sample_particles(no_particles)
-
-            scene.particles = particle_resampling
-
-            particles.set_data(scene.particles[:, 0], scene.particles[:, 1])
-
-            position_differences = scene.particles[:, :2] - np.array(robot_pos)[:2]
-
-            dists = np.sum(np.abs(position_differences) ** 2, axis=-1) ** (1. / 2)
-
-            distance_differences.append((np.mean(dists), np.std(dists)))
-
-            angle_diffs = np.abs(scene.particles[:, 2] - robot_pos[2]) % (2*np.pi)
-            angle_differences.append((np.mean(angle_diffs), np.std(angle_diffs)))
-
-            approximated_robot_x, approximated_robot_y = np.mean(scene.particles[:, 0]), np.mean(scene.particles[:, 1])
-            approximated_robot.set_data([approximated_robot_x], [approximated_robot_y])
-
-            particle_directions.set_UVC(
-                np.cos(scene.particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
-                np.sin(scene.particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
-                )
-            particle_directions.set_offsets(scene.particles[:, :2])
-
-            if no_random_particles > 0 and (i + 1) % 10 == 0:
-                random_particles = scene.uniform_sample_particles(no_random_particles)
-
-                view_random_particles.set_data(random_particles[:, 0], random_particles[:, 1])
-                view_random_particle_directions.set_UVC(
-                    np.cos(random_particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
-                    np.sin(random_particles[:, 2])*config.ROBOT_APPROXIMATED_DIRECTION_LENGTH,
-                    )
-                view_random_particle_directions.set_offsets(random_particles[:, :2])
-
-                scene.particles = np.vstack((scene.particles, random_particles))
-            else:
-                view_random_particles.set_data([], [])
-                view_random_particle_directions.set_UVC([], [])
-                view_random_particle_directions.set_offsets([])
 
         return background, overlay, particles, time_text, no_particles_text, robot, sensors, approximated_robot, \
                particle_directions, view_random_particles, view_random_particle_directions
