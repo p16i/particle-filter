@@ -196,7 +196,6 @@ class Environment(object):
     def vmeasurement_model(self, positions, observed_measurements):
         mm = partial(self.measurement_model, observed_measurements=observed_measurements)
 
-        # positions = [positions[i] for i in range(positions.shape[0])]
         positions = positions.tolist()
 
         with Pool(10) as p:
