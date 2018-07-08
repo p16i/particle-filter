@@ -122,8 +122,8 @@ def main(scene, no_particles=10, total_frames=None, frame_interval=50, show_part
 
                 distance_differences.append((np.mean(dists), np.std(dists)))
 
-                angle_diffs = np.abs(scene.particles[:, 2] - robot_pos[2]).reshape(-1, 1)
-                angle_diffs = np.hstack((angle_diffs, 2*np.pi - angle_diffs))
+                angle_diffs = (scene.particles[:, 2] - robot_pos[2]).reshape(-1, 1)
+                angle_diffs = np.hstack((angle_diffs, -angle_diffs)) % (2*np.pi)
                 angle_diffs = np.min(angle_diffs, axis=1)
                 angle_differences.append((np.mean(angle_diffs), np.std(angle_diffs)))
 
