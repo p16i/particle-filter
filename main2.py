@@ -15,6 +15,7 @@ logging.basicConfig(format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:
 
 robot_pos = None
 
+
 distance_differences = []
 angle_differences = []
 
@@ -121,7 +122,9 @@ def main(scene, no_particles=10, total_frames=None, frame_interval=50, show_part
 
                 distance_differences.append((np.mean(dists), np.std(dists)))
 
-                angle_diffs = np.abs(scene.particles[:, 2] - robot_pos[2]) % (2*np.pi)
+                angle_diffs = np.abs(scene.particles[:, 2] - robot_pos[2]).reshape(-1, 1)
+                angle_diffs = np.hstack((angle_diffs, 2*np.pi - angle_diffs))
+                angle_diffs = np.min(angle_diffs, axis=1)
                 angle_differences.append((np.mean(angle_diffs), np.std(angle_diffs)))
 
                 approximated_robot_x, approximated_robot_y = np.mean(scene.particles[:, 0]), np.mean(scene.particles[:, 1])
@@ -180,8 +183,9 @@ def main(scene, no_particles=10, total_frames=None, frame_interval=50, show_part
         res_ax[0].plot(x, y)
         res_ax[0].fill_between(x, y - std, y + std, alpha=0.5)
 
+        y_tick_positions = np.linspace(0, np.linalg.norm(scene.map.shape[:2])*0.75, 5)
         res_ax[0].set_ylabel("Position Difference")
-        res_ax[0].set_yticks(np.linspace(0, np.linalg.norm(scene.map.shape[:2])*0.75, 5))
+        res_ax[0].set_yticks(y_tick_positions)
 
         x = np.arange(angle_differences.shape[0])
         y = angle_differences[:, 0]
@@ -189,10 +193,16 @@ def main(scene, no_particles=10, total_frames=None, frame_interval=50, show_part
         res_ax[1].plot(x, y)
         res_ax[1].fill_between(x, y - std, y + std, alpha=0.5)
 
+        y_tick_thetas = [0, np.pi]
         res_ax[1].set_ylabel("Angle Difference")
         res_ax[1].set_xlabel("Time")
-        res_ax[1].set_yticks([0, np.pi, 2*np.pi])
-        res_ax[1].set_yticklabels(['0', '$\pi$', '$2\pi$'])
+        res_ax[1].set_yticks(y_tick_thetas)
+        res_ax[1].set_yticklabels(['0', '$\pi$'])
+
+        if scene.kidnapping_occur_at:
+            res_ax[0].plot([scene.kidnapping_occur_at]*2, [y_tick_positions[0], y_tick_positions[-1]], 'r--')
+            res_ax[1].plot([scene.kidnapping_occur_at]*2, [y_tick_thetas[0], y_tick_thetas[-1]], 'r--')
+
 
         title = '%d particles' % no_particles
 
