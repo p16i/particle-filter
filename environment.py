@@ -41,12 +41,19 @@ class Environment(object):
 
         self.controls = [Environment._build_control(l) for l in self.paths]
 
-        self.total_frames = (len(self.paths) - 1) + np.sum([len(a) for a in self.controls])
+        total_controls = np.sum([len(a) for a in self.controls])
+        logging.info('we have %d controls' % total_controls)
+
+        if len(self.paths) > 1:
+            self.kidnapping_occur_at = len(self.controls[0])
+        else:
+            self.kidnapping_occur_at = None
+
+        self.total_frames = (len(self.paths) - 1) + total_controls
 
         self.no_sensors = config.SYSTEM_NO_SENSORS
         self.radar_thetas = (np.arange(0, self.no_sensors) - self.no_sensors // 2)*(np.pi/self.no_sensors)
 
-        logging.info('we have %d controls' % len(self.controls))
 
         self.traversable_area = np.stack(np.nonzero(1 - (self.map_with_safe_boundary.T < 0.7)), axis=1)
 
