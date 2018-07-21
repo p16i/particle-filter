@@ -12,7 +12,6 @@ This project is a examination project for SS18 [Monte Carlo Methods in Artificia
 ## Setup
 ```
 pip install -r requirements.txt
-
 ```
 
 ## Usage
