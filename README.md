@@ -35,7 +35,7 @@ python particle-filter.py --scene scene-1 --no-particles 100 --save
 ```
 
 ![](https://i.imgur.com/RxP35Wa.png)
-![](https://i.imgur.com/nGGTT7f.gif)
+![](https://i.imgur.com/smYPY13.gif)
 
 
 ## Members
