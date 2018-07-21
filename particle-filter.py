@@ -34,8 +34,6 @@ def main(scene, no_particles=10, total_frames=None, frame_interval=50, show_part
 
     ax.set_yticks([0, mm.shape[0]])
     ax.set_xticks([0, mm.shape[1]])
-    # fig.patch.set_visible(False)
-    # ax.axis('off')
 
     background = ax.imshow(mm, origin='lower', cmap='gist_gray', vmax=1, vmin=0)
     overlay = ax.imshow(scene.convolve_mark_overlay, origin='lower', cmap='gist_gray', vmax=1, vmin=0, alpha=0.1)
