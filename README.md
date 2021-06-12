@@ -8,7 +8,7 @@
 
 This project is a examination project for SS18 [Monte Carlo Methods in Artificial Intelligence and Machine Learning](https://www.ki.tu-berlin.de/menue/lehre/sommersemster_2018/) course taught by Prof. Dr. Manfred Opper and Theo Galy-Fajou, at TU Berlin.
 
-[Presentation](https://docs.google.com/presentation/d/1YpLM_q6YCEqP6g9y3OdV3z-X419Sa1krqwrsSDCFI6g/edit?usp=sharing)
+[[Presentation]](https://docs.google.com/presentation/d/1YpLM_q6YCEqP6g9y3OdV3z-X419Sa1krqwrsSDCFI6g)
 
 ## Setup
 ```
